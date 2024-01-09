@@ -38,7 +38,7 @@ required-features = ["2d"]
 
 [dependencies]
 bevy_xpbd_derive = { path = "../bevy_xpbd_derive", version = "0.1" }
-bevy = { path="../../../bevy", default-features = false }
+bevy = { git = "https://github.com/TeamDman/bevy.git", branch = "cursor_hero", default-features = false }
 parry2d = { version = "0.13", optional = true }
 parry2d-f64 = { version = "0.13", optional = true }
 nalgebra = { version = "0.32", features = ["convert-glam024"] }
