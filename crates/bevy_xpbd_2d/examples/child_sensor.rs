@@ -4,7 +4,11 @@ use examples_common_2d::XpbdExamplePlugin;
 
 fn main() {
     App::new()
-        .add_plugins((DefaultPlugins, XpbdExamplePlugin))
+        .add_plugins((
+            DefaultPlugins,
+            XpbdExamplePlugin,
+            PhysicsDebugPlugin::default(),
+        ))
         .insert_resource(ClearColor(Color::rgb(0.05, 0.05, 0.1)))
         .insert_resource(Gravity(Vector::ZERO))
         .add_event::<MovementAction>()
@@ -35,6 +39,8 @@ struct PressurePlate;
 
 #[derive(Component, Default, Reflect)]
 struct Hand;
+#[derive(Component, Default, Reflect)]
+struct HandJoint;
 
 #[derive(Component, Default, Reflect)]
 struct Ghost;
@@ -64,48 +70,66 @@ fn setup(
             ..default()
         },
         Character,
-        RigidBody::Dynamic,
+        RigidBody::Kinematic,
         Collider::capsule(20.0, 12.5),
         Name::new("Character"),
     ));
 
+    let character_id = character.id();
+
     character.with_children(|parent| {
-        parent.spawn((
-            SpriteBundle {
-                transform: Transform::from_xyz(0.0, 150.0, 0.0),
-                sprite: Sprite {
-                    color: Color::WHITE,
-                    custom_size: Some(Vec2::new(100.0, 100.0)),
+        let pp = parent
+            .spawn((
+                SpriteBundle {
+                    transform: Transform::from_xyz(0.0, 150.0, 0.0),
+                    sprite: Sprite {
+                        color: Color::WHITE,
+                        custom_size: Some(Vec2::new(100.0, 100.0)),
+                        ..default()
+                    },
                     ..default()
                 },
-                ..default()
-            },
-            PressurePlate,
-            Sensor,
-            RigidBody::Static,
-            Collider::cuboid(100.0, 100.0),
-            Name::new("Pressure Plate"),
-        ));
+                PressurePlate,
+                Sensor,
+                RigidBody::Dynamic,
+                Collider::cuboid(100.0, 100.0),
+                Name::new("Pressure Plate"),
+            ))
+            .id();
+
+        parent.spawn(FixedJoint::new(character_id, pp).with_local_anchor_1(Vector::Y * 100.0));
+
+        let hand = parent
+            .spawn((
+                MaterialMesh2dBundle {
+                    mesh: meshes
+                        .add(
+                            shape::Circle {
+                                radius: 25.0,
+                                ..default()
+                            }
+                            .into(),
+                        )
+                        .into(),
+                    material: materials.add(ColorMaterial::from(Color::rgb(0.9, 0.7, 0.9))),
+                    transform: Transform::from_xyz(100.0, 0.0, 10.0),
+                    ..default()
+                },
+                Hand,
+                RigidBody::Dynamic,
+                Collider::ball(25.0),
+                Name::new("Hand"),
+            ))
+            .id();
 
         parent.spawn((
-            MaterialMesh2dBundle {
-                mesh: meshes
-                    .add(
-                        shape::Circle {
-                            radius: 25.0,
-                            ..default()
-                        }
-                        .into(),
-                    )
-                    .into(),
-                material: materials.add(ColorMaterial::from(Color::rgb(0.9, 0.7, 0.9))),
-                transform: Transform::from_xyz(100.0, 0.0, 10.0),
-                ..default()
-            },
-            Hand,
-            RigidBody::Dynamic,
-            Collider::ball(25.0),
-            Name::new("Hand"),
+            DistanceJoint::new(character_id, hand)
+                .with_rest_length(100.0)
+                .with_limits(90.0, 110.0)
+                .with_linear_velocity_damping(0.1)
+                .with_angular_velocity_damping(1.0)
+                .with_compliance(0.00000001),
+            HandJoint,
         ));
     });
 
@@ -245,31 +269,37 @@ fn has_movement(mut reader: EventReader<MovementAction>) -> bool {
 fn movement(
     time: Res<Time>,
     mut movement_event_reader: EventReader<MovementAction>,
-    mut controllers: Query<&mut LinearVelocity, (With<Character>, Without<Hand>, Without<Ghost>)>,
-    mut hands: Query<&mut LinearVelocity, (With<Hand>, Without<Character>, Without<Ghost>)>,
+    mut character_query: Query<&mut LinearVelocity, (With<Character>, Without<Hand>, Without<Ghost>)>,
+    mut hand_query: Query<&mut LinearVelocity, (With<Hand>, Without<Character>, Without<Ghost>)>,
+    mut hand_joint_query: Query<&mut DistanceJoint, With<HandJoint>>,
 ) {
     let delta_time = time.delta_seconds_f64().adjust_precision();
-    for mut character_velocity in &mut controllers {
-        for mut hand_velocity in &mut hands {
-            for event in movement_event_reader.read() {
-                match event {
-                    MovementAction::Stop => {
-                        character_velocity.x = 0.0;
-                        character_velocity.y = 0.0;
-                        hand_velocity.x = 0.0;
-                        hand_velocity.y = 0.0;
-                    }
-                    MovementAction::Character(direction) => {
-                        let movement_acceleration = 2000.0;
-                        character_velocity.x += direction.x * movement_acceleration * delta_time;
-                        character_velocity.y += direction.y * movement_acceleration * delta_time;
-                    }
-                    MovementAction::Hand(direction) => {
-                        let movement_acceleration = 2000.0;
-                        hand_velocity.x += direction.x * movement_acceleration * delta_time;
-                        hand_velocity.y += direction.y * movement_acceleration * delta_time;
-                    }
+    for event in movement_event_reader.read() {
+        match event {
+            MovementAction::Stop => {
+                for mut character_velocity in &mut character_query {
+                    character_velocity.x = 0.0;
+                    character_velocity.y = 0.0;
                 }
+                // hand_joint.x = 0.0;
+                // hand_joint.y = 0.0;
+            }
+            MovementAction::Character(direction) => {
+                let movement_acceleration = 2000.0;
+                // for mut hand_joint in &mut hand_joint {}
+                for mut character_velocity in &mut character_query {
+                    character_velocity.x += direction.x * movement_acceleration * delta_time;
+                    character_velocity.y += direction.y * movement_acceleration * delta_time;
+                }
+            }
+            MovementAction::Hand(direction) => {
+                let movement_acceleration = 2000.0;
+                for mut hand_velocity in &mut hand_query {
+                    hand_velocity.x += direction.x * movement_acceleration * delta_time;
+                    hand_velocity.y += direction.y * movement_acceleration * delta_time;
+                }
+                // hand_joint.x += direction.x * movement_acceleration * delta_time;
+                // hand_joint.y += direction.y * movement_acceleration * delta_time;
             }
         }
     }
